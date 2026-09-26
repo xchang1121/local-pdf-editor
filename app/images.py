@@ -20,9 +20,9 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_PIXELS = 24_000_000
 
 
-def import_image(raw: bytes) -> dict:
-    if len(raw) > MAX_IMAGE_BYTES:
-        raise EditError('单张图片最大支持 20 MB。')
+def import_image(raw: bytes, max_bytes=MAX_IMAGE_BYTES) -> dict:
+    if len(raw) > max_bytes:
+        raise EditError(f'单张图片最大支持 {max_bytes // 1024 // 1024} MB。')
     try:
         with Image.open(BytesIO(raw)) as source:
             if source.format not in {'PNG', 'JPEG', 'WEBP'}:

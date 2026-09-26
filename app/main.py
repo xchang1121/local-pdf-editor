@@ -21,7 +21,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import engine
 from . import images as image_tools
-from .schemas import ExportRequest, PreviewRequest
+from . import search as search_tools, projects
+from .schemas import ExportRequest, PreviewRequest, SearchRequest, SearchReplaceRequest
 
 BASE = Path(__file__).resolve().parent
 MAX_UPLOAD = 50 * 1024 * 1024
@@ -77,7 +78,8 @@ class BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in ("POST", "PUT", "PATCH"):
             return await self.app(scope, receive, send)
-        maximum = ({'/api/import': MAX_UPLOAD, '/api/images': image_tools.MAX_IMAGE_BYTES}.get(scope['path'], 7 * 1024 * 1024)
+        maximum = ({'/api/import': MAX_UPLOAD, '/api/images': image_tools.MAX_IMAGE_BYTES,
+                    '/api/projects/open':projects.MAX_PROJECT_BYTES}.get(scope['path'], 7 * 1024 * 1024)
                    + 1024 * 1024)
         headers = dict(scope.get("headers", []))
         try:
@@ -85,7 +87,7 @@ class BodyLimitMiddleware:
         except ValueError:
             declared = maximum + 1
         if declared > maximum:
-            return await JSONResponse({"detail": "请求过大；单个 PDF 上限为 50 MB，图片上限为 20 MB。"}, 413)(scope, receive, send)
+            return await JSONResponse({"detail": "请求过大；单个 PDF 上限为 50 MB，图片为 20 MB，项目文件为 220 MB。"}, 413)(scope, receive, send)
         size = 0
         chunks = []
         while True:
@@ -150,7 +152,7 @@ async def get_session(request: Request, x_session_token: str = Header(default=""
     cleanup(request)
     session = request.app.state.sessions.get(x_session_token)
     if session is None:
-        raise HTTPException(401, "会话不存在或已过期。请刷新网页并重新导入 PDF。")
+        raise HTTPException(401, "会话不存在或已过期。请刷新网页后打开已保存的项目文件，或重新导入 PDF。")
     session.touched = time.monotonic()
     return session
 
@@ -247,6 +249,52 @@ def require_source(session, source):
     if source and source not in session.sources:
         raise HTTPException(404, "源文件不属于当前会话，或会话已经过期。")
     return session.sources.get(source)
+
+
+def document_assets(session, pages):
+    return ({page.source:require_source(session,page.source) for page in pages if page.source}, require_images(session,pages))
+
+
+@app.post('/api/search')
+async def search(payload: SearchRequest, request: Request, session: Session = Depends(get_session)):
+    sources, images = document_assets(session, payload.pages)
+    return await pdf_job(request, search_tools.find, payload.model_dump(), sources, images)
+
+
+@app.post('/api/search/replace')
+async def replace_matches(payload: SearchReplaceRequest, request: Request, session: Session = Depends(get_session)):
+    sources, images = document_assets(session, payload.pages)
+    return await pdf_job(request, search_tools.replace, payload.model_dump(), sources, images)
+
+
+@app.post('/api/projects/save')
+async def save_project(payload: projects.ProjectPayload, request: Request, session: Session = Depends(get_session)):
+    pages = [*payload.document.pages, *payload.history.pages]
+    sources, images = document_assets(session, pages)
+    data = await pdf_job(request, projects.save, payload.model_dump(), sources, images)
+    name = payload.document.name.replace('\\','/').rsplit('/',1)[-1]
+    if name.lower().endswith('.pdf'):
+        name = name[:-4]
+    return Response(data, media_type='application/zip', headers={
+        'Content-Disposition':f"attachment; filename=project.pdfstudio; filename*=UTF-8''{quote(name+'.pdfstudio')}"})
+
+
+@app.post('/api/projects/open')
+async def open_project(request: Request, file: UploadFile = File(...), session: Session = Depends(get_session)):
+    try:
+        raw = await file.read(projects.MAX_PROJECT_BYTES + 1)
+    finally:
+        await file.close()
+    if len(raw) > projects.MAX_PROJECT_BYTES:
+        raise HTTPException(413, '项目文件最大支持 220 MB。')
+    result = await pdf_job(request, projects.open_project, raw)
+    size = sum(map(len,result['sources'].values())) + sum(map(len,result['images'].values()))
+    if sum(s.size for s in request.app.state.sessions.values()) - session.size + size > MAX_TOTAL_BYTES:
+        raise HTTPException(503, '服务器文件内存已达上限，请结束闲置会话。')
+    # Replace only after the entire archive and every historical page can replay.
+    session.sources, session.images = result['sources'], result['images']
+    session.touched = time.monotonic()
+    return {'project':result['project'], 'warnings':result['warnings']}
 
 
 @app.post("/api/preview")

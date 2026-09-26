@@ -29,6 +29,10 @@ const icons = {
   close:'m6 6 12 12M6 18 18 6',
   image:'M3 3h18v18H3zM3 16l5-5 4 4 3-3 6 6M8 7h.01',
   history:'M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2',
+  search:'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  save:'M4 3h13l4 4v14H3V3h1Zm3 0v6h10V3M7 21v-8h10v8',
+  highlight:'m7 15 8-11 5 4-8 11-5-4ZM3 21h12M7 15l-2 5 7-1',
+  note:'M4 3h16v13l-5 5H4V3Zm11 18v-5h5M8 8h8M8 12h6',
 };
 function mountIcons(root=document) {
   root.querySelectorAll('[data-icon]').forEach(el => {
@@ -41,7 +45,7 @@ mountIcons();
 const S = {
   token: '', pages: [], active: null, selected: new Set(), tool: 'select',
   draft: null, draftBaseline: null, data: null, displayPage: null, zoom: 'fit', name: '未命名文档.pdf',
-  timeline: [], historyCursor: 0, sidebar: 'pages', dirty: false, busy: false, drawing: null,
+  timeline: [], historyCursor: 0, sidebar: 'pages', dirty: false, projectMode: false, projectDirty: false, busy: false, drawing: null,
 };
 let previewSerial = 0, uploadMode = 'replace', toastTimer, busyCounter = 0;
 let thumbnailObserver, thumbWorking = false, thumbQueue = [], dragId = null;
@@ -132,10 +136,10 @@ function unpackHistory(saved,validPage) {
 function persist() {
   try {
     sessionStorage.setItem(TOKEN_KEY, S.token);
-    sessionStorage.setItem(CURRENT_KEY, JSON.stringify({ ...snapshot(), dirty:S.dirty, history:packHistory() }));
+    sessionStorage.setItem(CURRENT_KEY, JSON.stringify({ ...snapshot(), dirty:S.dirty, projectMode:S.projectMode, projectDirty:S.projectDirty, history:packHistory() }));
   } catch (_) {
     let currentSaved=false;
-    try {sessionStorage.setItem(CURRENT_KEY,JSON.stringify({...snapshot(),dirty:S.dirty}));currentSaved=true;}catch(_){}
+    try {sessionStorage.setItem(CURRENT_KEY,JSON.stringify({...snapshot(),dirty:S.dirty,projectMode:S.projectMode,projectDirty:S.projectDirty}));currentSaved=true;}catch(_){}
     if (!storageWarning) {
       storageWarning = true;
       toast(currentSaved?'历史记录超出浏览器暂存空间；当前文档已暂存，刷新后只能恢复当前状态。':'浏览器暂存空间不足；请及时导出，刷新将无法完整恢复。', 'warning', 7000);
@@ -145,7 +149,7 @@ function persist() {
 function commit(pages, active, label, name=S.name) {
   if(!S.timeline.length)resetHistory();
   S.timeline=S.timeline.slice(0,S.historyCursor+1);
-  S.pages = pages; S.active = active; S.name = name; S.dirty = true;
+  S.pages = pages; S.active = active; S.name = name; S.dirty = true;S.projectDirty=true;invalidateSearch();
   S.timeline.push({label,time:new Date().toISOString(),state:snapshot()});
   if(S.timeline.length>HISTORY_LIMIT+1)S.timeline.shift();
   S.historyCursor=S.timeline.length-1;
@@ -154,7 +158,7 @@ function commit(pages, active, label, name=S.name) {
 }
 function restore(snapshotValue) {
   S.pages = snapshotValue.pages; S.active = snapshotValue.active; S.name = snapshotValue.name;
-  S.selected.clear(); S.dirty = true; clearDraft(); persist(); refresh();
+  S.selected.clear(); S.dirty = true;S.projectDirty=true;invalidateSearch(); clearDraft(); persist(); refresh();
 }
 function historyStep(redo=false) {
   jumpHistory(S.historyCursor+(redo?1:-1));
@@ -166,11 +170,11 @@ function jumpHistory(index) {
 }
 function showSidebar(panel) {
   S.sidebar=panel;
-  for(const name of ['pages','history']) {
+  for(const name of ['pages','history','search']) {
     $(`${name}-panel`).hidden=name!==panel;
     $(`tab-${name}`).setAttribute('aria-selected',String(name===panel));
   }
-  if(panel==='history')renderHistory();else renderThumbnails();
+  if(panel==='history')renderHistory();else if(panel==='pages')renderThumbnails();else renderSearch();
 }
 function renderHistory() {
   $('history-count').textContent=Math.max(0,S.timeline.length-1);
@@ -193,6 +197,7 @@ function discardDraft() {
 }
 function draftFingerprint() {
   if(S.draft.kind==='image_replace')return JSON.stringify([S.draft.asset,$('image-fit').value]);
+  if(S.draft.kind==='annotation_update')return JSON.stringify([$('annotation-comment').value,$('annotation-color').value,$('annotation-opacity').value]);
   // Read displayed values without validating or mutating geometry. The initial
   // form already contains rounded coordinates; comparing with raw PDF floats
   // would incorrectly mark a newly selected region as modified.
@@ -213,6 +218,8 @@ function draftFingerprint() {
 function hasPendingDraftChanges() {
   if(!S.draft)return false;
   if(S.draft.kind==='image_replace')return !!S.draft.asset;
+  if(S.draft.kind==='annotation_update')return draftFingerprint()!==S.draftBaseline;
+  if(S.draft.kind==='note')return !!$('annotation-comment').value.trim();
   if(S.draft.kind==='text')return !!$('text-content').value.trim();
   if(S.draft.kind==='replace')return draftFingerprint()!==S.draftBaseline;
   // Drawing a crop, cover or redaction is itself an actionable change.
@@ -230,7 +237,7 @@ function updateControls() {
   $('page-up').disabled = !page || S.pages[0]?.id === page.id || disabled;
   $('page-down').disabled = !page || S.pages.at(-1)?.id === page.id || disabled;
   $('reset-page').disabled = !page?.ops.length || disabled;
-  for (const id of ['btn-open','btn-append','btn-blank','btn-start-blank','btn-demo','btn-clear','apply-edit','cancel-edit','remove-text','choose-image-file']) $(id).disabled = disabled;
+  for (const id of ['btn-open','btn-append','btn-blank','btn-start-blank','btn-demo','btn-clear','apply-edit','cancel-edit','remove-text','remove-annotation','choose-image-file']) $(id).disabled = disabled;
   if(S.draft?.kind==='image_replace' && !S.draft.asset)$('apply-edit').disabled=true;
   document.querySelectorAll('.history-entry').forEach(el=>{el.disabled=disabled;});
   document.querySelectorAll('[data-tool]').forEach(el => { el.disabled = disabled; });
@@ -239,10 +246,12 @@ function updateControls() {
   $('select-all').indeterminate = S.selected.size > 0 && S.selected.size < S.pages.length;
   $('selected-count').textContent = S.selected.size ? `已选 ${S.selected.size} 页` : '未勾选';
   $('document-title').textContent = has ? S.name : '未打开文档';
-  $('document-subtitle').textContent = has ? `${S.pages.length} 页 · ${S.dirty ? '有未导出的修改' : '已导出 / 就绪'}` : '让文档修改，更直接一点。';
+  const savedLabel=S.projectMode?(S.projectDirty?'项目有未保存的修改':'项目已保存'):(S.dirty?'有未导出的修改':'已导出 / 就绪');
+  $('document-subtitle').textContent = has ? `${S.pages.length} 页 · ${savedLabel}` : '让文档修改，更直接一点。';
   $('page-count').textContent = S.pages.length;
   $('status-pages').textContent = has ? `第 ${S.pages.findIndex(p=>p.id===S.active)+1} / ${S.pages.length} 页 · 原文件不变` : '源文件不会被覆盖';
   $('detail-ops').textContent = page ? `${page.ops.length} 项` : '—';
+  updateFeatureControls();
 }
 function dimensions(page) {
   let w = page.width, h = page.height;
@@ -261,7 +270,7 @@ function refresh() {
     ++previewSerial; S.data = null; S.displayPage = null;
     $('page-size').textContent = ''; $('detail-size').textContent = '—';
     $('text-status').textContent = '扫描件没有可直接编辑的文字层。本版不包含 OCR。';
-    $('page-image').removeAttribute('src'); $('text-hits').replaceChildren();$('image-hits').replaceChildren();renderImageHits();
+    $('page-image').removeAttribute('src'); $('text-hits').replaceChildren();$('image-hits').replaceChildren();renderImageHits();renderAnnotations();renderSearchHits();
   }
 }
 async function getPreview(page, scale=1.5, withText=true) {
@@ -276,7 +285,7 @@ async function getPreview(page, scale=1.5, withText=true) {
 async function showPage() {
   const page = activePage(); if (!page) return;
   const serial = ++previewSerial;
-  S.displayPage = null; $('text-hits').replaceChildren();$('image-hits').replaceChildren();
+  S.displayPage = null; $('text-hits').replaceChildren();$('image-hits').replaceChildren();$('annotation-hits').replaceChildren();$('search-hits').replaceChildren();
   // Never allow editing against the previous page while a new page is loading.
   $('overlay').style.pointerEvents = 'none';
   busyStart('正在渲染页面…');
@@ -294,7 +303,7 @@ async function showPage() {
     if (!data.has_text) $('text-status').textContent = '本页未检测到文字层，可能是扫描件或纯图片。可以添加文字、裁剪或移除区域；本版不自动 OCR。';
     else if (data.skipped) $('text-status').textContent = `有 ${data.skipped} 个旋转 / 竖排文本块不支持直接编辑。旋转页面至文字水平后再试。`;
     else $('text-status').textContent = `检测到 ${data.blocks.length} 个文本块。点击选中，或切换为“单行文字”。`;
-    resizePage(); renderTextHits(); renderImageHits(); updateActiveThumb(src);
+    resizePage(); renderTextHits(); renderImageHits();renderAnnotations();renderSearchHits(); updateActiveThumb(src);
     if (data.warnings.length) toast(data.warnings.join('\n'), 'warning');
   } catch (error) {
     if (serial === previewSerial) {
@@ -397,18 +406,20 @@ async function runThumbnailQueue() {
 }
 function selectPage(id) {
   if(S.busy || id===S.active || !discardDraft())return;
+  if($('search-scope').value==='page')invalidateSearch();
   S.active=id;persist();refresh();
 }
 function updateTool() {
-  const hints={select:'点击文字块修改；右侧可切换为单行选择。',text:'在页面上拖出一个文本框，再在右侧输入文字。',image:'点击图片，上传替换图片，再应用。仅替换选中的这一处。',crop:'拖出需要保留的区域；可调整坐标或批量应用。',cover:'拖出遮盖区域。注意：底层内容不会被删除。',redact:'拖出要移除内容的区域；应用后请检查相邻文字和图形。'};
+  const hints={select:'点击文字块修改；右侧可切换为单行选择。',text:'在页面上拖出一个文本框，再在右侧输入文字。',image:'点击图片，上传替换图片，再应用。仅替换选中的这一处。',highlight:'拖选要高亮的文字或区域，可附加备注。',note:'点击页面放置便签，再在右侧填写备注。',crop:'拖出需要保留的区域；可调整坐标或批量应用。',cover:'拖出遮盖区域。注意：底层内容不会被删除。',redact:'拖出要移除内容的区域；应用后请检查相邻文字和图形。'};
   $('tool-hint').textContent=S.pages.length?hints[S.tool]:'打开一个 PDF，或从空白页开始。';
   document.querySelectorAll('[data-tool]').forEach(el=>el.classList.toggle('active',el.dataset.tool===S.tool));
   $('overlay').classList.toggle('draw-mode',!['select','image'].includes(S.tool));
   $('image-guide').hidden=S.tool!=='image';
-  $('guide-panel').querySelector('.guide-card').hidden=S.tool==='image';
-  $('text-granularity').closest('.field').hidden=S.tool==='image';
-  $('text-status').hidden=S.tool==='image';
-  renderTextHits();renderImageHits();
+  const objectTool=['image','highlight','note'].includes(S.tool);
+  $('guide-panel').querySelector('.guide-card').hidden=objectTool;
+  $('text-granularity').closest('.field').hidden=objectTool;
+  $('text-status').hidden=objectTool;
+  renderTextHits();renderImageHits();renderAnnotations();
 }
 function setTool(tool) {
   if(S.busy || tool===S.tool || !discardDraft())return;
@@ -496,12 +507,14 @@ function setDraft(draft) {
   $('draft-actions').hidden=false;
   $('guide-panel').hidden=true;$('draft-panel').hidden=false;$('draft-badge').hidden=false;
   const text=['text','replace'].includes(draft.kind);
-  $('properties-title').textContent={text:'添加文字',replace:'修改文字',image_replace:'替换图片',crop:'裁剪页面',cover:'视觉遮盖',redact:'真正删除内容'}[draft.kind];
+  const annotation=['highlight','note','annotation_update'].includes(draft.kind);
+  $('properties-title').textContent={text:'添加文字',replace:'修改文字',image_replace:'替换图片',highlight:'添加高亮',note:'添加便签',annotation_update:'修改批注',crop:'裁剪页面',cover:'视觉遮盖',redact:'真正删除内容'}[draft.kind];
   $('text-fields').hidden=!text;$('area-color-field').hidden=!['cover','redact'].includes(draft.kind);
-  $('image-fields').hidden=draft.kind!=='image_replace';$('geometry-fields').hidden=draft.kind==='image_replace';
+  $('image-fields').hidden=draft.kind!=='image_replace';$('geometry-fields').hidden=['image_replace','annotation_update'].includes(draft.kind);
+  $('annotation-fields').hidden=!annotation;$('remove-annotation').hidden=draft.kind!=='annotation_update';
   $('crop-options').hidden=draft.kind!=='crop';$('remove-text').hidden=draft.kind!=='replace';
   $('crop-all').checked=false;
-  $('edit-note').textContent={text:'输入新文字，调整文本框位置和样式后应用。',replace:'移除原文字后重新排版。新文字会使用所选替代字体。',crop:'选框内部是保留区域，框外区域会被隐藏。',cover:'仅绘制覆盖层，不删除底层文字或图片。不能用作隐私脱敏。',redact:'移除选区内的文字和图像像素，并移除与选区接触的矢量路径。较大的跨区图形可能一并消失。'}[draft.kind];
+  $('edit-note').textContent={text:'输入新文字，调整文本框位置和样式后应用。',replace:'移除原文字后重新排版。新文字会使用所选替代字体。',highlight:'高亮会贴合框内的文字；没有文字时标记整个区域。',note:'填写便签后应用；文字保留在批注中，页面显示便签图标。',annotation_update:'修改批注内容与颜色，或删除这条批注。',crop:'选框内部是保留区域，框外区域会被隐藏。',cover:'仅绘制覆盖层，不删除底层文字或图片。不能用作隐私脱敏。',redact:'移除选区内的文字和图像像素，并移除与选区接触的矢量路径。较大的跨区图形可能一并消失。'}[draft.kind];
   $('edit-note').className=`note${['redact','cover'].includes(draft.kind)?' warning':''}`;
   if(text) {
     const style=draft.style;
@@ -510,6 +523,12 @@ function setDraft(draft) {
     $('font-family').value=style.family;$('font-bold').checked=style.bold;$('font-italic').checked=style.italic;
     $('text-align').value=style.align;$('text-color').value=style.color;$('text-fit').checked=style.fit;
     $('text-background').checked=!!style.background;$('background-color').value=style.background||'#ffffff';
+  } else if(annotation) {
+    $('annotation-comment').value=draft.comment||'';$('annotation-color').value=draft.color||'#ffd34e';
+    const opacity=String(draft.opacity??.45),select=$('annotation-opacity');
+    if(![...select.options].some(option=>option.value===opacity))select.add(new Option(`${Math.round(Number(opacity)*100)}%`,opacity));
+    select.value=opacity;$('annotation-snap').checked=draft.snap!==false;
+    $('annotation-snap-row').hidden=draft.kind!=='highlight';
   } else if(draft.kind==='image_replace') {
     $('image-fit').value=draft.fit;
     $('replacement-preview').removeAttribute('src');$('replacement-preview').hidden=true;$('replacement-placeholder').hidden=false;
@@ -536,7 +555,7 @@ function positionSelection() {
   const box=$('selection-box');
   if(!S.draft || !S.data){box.hidden=true;return;}
   box.hidden=false;box.className=`selection-box ${S.draft.kind}`;applyPercentBox(box,S.draft.rect);
-  $('selection-caption').textContent={replace:'替换文字 · 拖动移动',text:'新文本框',image_replace:'已选中图片 · 右侧上传替换',crop:'保留此区域',cover:'视觉遮盖',redact:'删除此区域内容'}[S.draft.kind];
+  $('selection-caption').textContent={replace:'替换文字 · 拖动移动',text:'新文本框',image_replace:'已选中图片 · 右侧上传替换',highlight:'高亮此区域',note:'便签位置',annotation_update:'已选中批注',crop:'保留此区域',cover:'视觉遮盖',redact:'删除此区域内容'}[S.draft.kind];
 }
 function readRectInputs() {
   if(!S.draft || !S.data)return;
@@ -548,6 +567,7 @@ function readRectInputs() {
   S.draft.rect=[x,y,x+w,y+h];positionSelection();
 }
 function formDraft() {
+  if(['highlight','note','annotation_update'].includes(S.draft.kind))return annotationForm();
   if(S.draft.kind==='image_replace') {
     const {kind,image_index,bbox,digest,asset}=S.draft;
     if(!asset)throw new Error('请先选择替换图片。');
@@ -570,17 +590,23 @@ function point(event) {
 }
 $('overlay').addEventListener('pointerdown',event=>{
   if(event.button!==0 || S.busy || !S.data || S.displayPage!==S.active)return;
-  const hit=event.target.closest('.text-hit,.image-hit'), selection=event.target.closest('#selection-box');
+  const hit=event.target.closest('.text-hit,.image-hit,.annotation-hit'), selection=event.target.closest('#selection-box');
   if(hit && !selection)return;
   const p=point(event);
   if(selection && S.draft) {
-    if(S.draft.kind==='image_replace')return;
+    if(['image_replace','annotation_update'].includes(S.draft.kind))return;
     S.drawing={mode:event.target.dataset.resize?'resize':'move',start:p,rect:[...S.draft.rect]};
   } else if(!['select','image'].includes(S.tool)) {
     if(S.draft && !discardDraft())return;
     const kind=S.tool;
+    if(kind==='note') {
+      const x=Math.max(0,Math.min(p[0],S.data.width-20)),y=Math.max(0,Math.min(p[1],S.data.height-20));
+      setDraft({kind,id:uid(),rect:[x,y,Math.min(x+20,S.data.width),Math.min(y+20,S.data.height)],comment:'',color:'#ffd34e',opacity:1});
+      $('annotation-comment').focus();event.preventDefault();return;
+    }
     const draft={kind,rect:[p[0],p[1],p[0]+.01,p[1]+.01]};
     if(kind==='text')Object.assign(draft,{text:'',erase:[],style:defaultStyle()});
+    else if(kind==='highlight')Object.assign(draft,{id:uid(),comment:'',color:'#ffd34e',opacity:.45,snap:true});
     else draft.color=kind==='redact'?'#000000':'#ffffff';
     setDraft(draft);S.drawing={mode:'draw',start:p};
   } else {if(S.draft)discardDraft();return;}
@@ -638,7 +664,7 @@ async function applyEdit(deleteOnly=false) {
     // Validate before committing, including text overflow. On failure, keep the
     // draft and the original document unchanged, rather than committing a no-op.
     await getPreview(current);
-    const action={text:'添加文字',replace:deleteOnly?'删除原文字':'修改文字',image_replace:'替换图片',crop:'裁剪页面',cover:'添加遮盖',redact:'真正删除内容'}[op.kind];
+    const action={text:'添加文字',replace:deleteOnly?'删除原文字':'修改文字',image_replace:'替换图片',annotation:op.type==='note'?'添加便签':'添加高亮',annotation_update:'修改批注',crop:'裁剪页面',cover:'添加遮盖',redact:'真正删除内容'}[op.kind];
     commit(pages,S.active,allCrop?'裁剪所有页面':`第 ${pages.indexOf(current)+1} 页 · ${action}`);
   });
 }
@@ -697,6 +723,7 @@ function openPicker(mode) {
   if(S.busy)return;uploadMode=mode;$('file-input').value='';$('file-input').click();
 }
 async function importFiles(files,mode='append') {
+  if(files.length===1&&/\.pdfstudio$/i.test(files[0].name)){await openProject(files[0]);return;}
   if(!files.length||S.busy||!discardDraft())return;
   if(mode==='replace'&&S.pages.length&&!confirm('打开新文档将替换当前页面列表。可通过撤销返回；建议先导出当前文档。'))return;
   await mutate('正在导入 PDF…',async()=>{
@@ -759,7 +786,7 @@ async function clearSession() {
   if(!confirm('清空当前页面、源文件和全部撤销记录？请先导出需要保留的内容。'))return;
   await mutate('正在结束会话…',async()=>{
     await api('/session',{method:'DELETE'});
-    S.token='';S.pages=[];S.active=null;S.selected.clear();S.dirty=false;S.name='未命名文档.pdf';resetHistory();
+    S.token='';S.pages=[];S.active=null;S.selected.clear();S.dirty=false;S.projectMode=false;S.projectDirty=false;S.name='未命名文档.pdf';resetHistory();invalidateSearch();
     previews.clear();thumbnails.clear();clearDraft();sessionStorage.removeItem(CURRENT_KEY);sessionStorage.removeItem(TOKEN_KEY);
     const response=await api('/session');const data=await response.json();S.token=data.token;persist();refresh();setStatus('会话已清空');
   });
@@ -819,19 +846,22 @@ document.addEventListener('drop',event=>{
 });
 document.addEventListener('keydown',event=>{
   if(document.querySelector('dialog[open]'))return;
+  if(!S.busy && (event.ctrlKey||event.metaKey)) {
+    if(event.key.toLowerCase()==='f'){event.preventDefault();openSearch();return;}
+    if(event.key.toLowerCase()==='s'){event.preventDefault();if(event.shiftKey)openExport();else void saveProject();return;}
+  }
   const typing=event.target.matches('input,textarea,select,[contenteditable="true"]');
   if(event.key==='Escape'){clearDraft();return;}
   if(typing||S.busy)return;
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();historyStep(event.shiftKey);}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='y'){event.preventDefault();historyStep(true);}
-  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();openExport();}
   if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(!S.draft)deletePages();}
   if(event.key==='PageDown'||event.key==='PageUp'){
     const index=S.pages.findIndex(p=>p.id===S.active)+(event.key==='PageDown'?1:-1);
     if(S.pages[index]){event.preventDefault();selectPage(S.pages[index].id);}
   }
 });
-window.addEventListener('beforeunload',event=>{if(S.dirty||hasPendingDraftChanges()){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(hasUnsavedChanges()||hasPendingDraftChanges()){event.preventDefault();event.returnValue='';}});
 
 async function init() {
   try {
@@ -841,14 +871,16 @@ async function init() {
     const validPage=p=>p && Array.isArray(p.ops) && (!p.source||data.sources.includes(p.source)) && p.ops.every(op=>op.kind!=='image_replace'||(data.images||[]).includes(op.asset));
     if(Array.isArray(saved?.pages) && saved.pages.every(validPage)) {
       S.pages=saved.pages;S.active=saved.pages.some(p=>p.id===saved.active)?saved.active:saved.pages[0]?.id||null;S.name=saved.name||S.name;S.dirty=!!saved.dirty;
+      S.projectMode=!!saved.projectMode;S.projectDirty=saved.projectDirty??S.dirty;
       const restored=unpackHistory(saved,validPage);
       if(!restored)resetHistory('已恢复文档');
       toast(restored?'已恢复当前标签页的文档和编辑历史。':'已恢复当前文档；之前的历史不可恢复，已从当前状态继续。');
     } else {
       resetHistory();
-      if(saved?.pages?.length)toast('之前的文件会话已过期或服务已重启，请重新导入 PDF。','warning',6500);
+      if(saved?.pages?.length)toast('之前的会话已过期或服务已重启。可从“项目”打开已保存的 .pdfstudio 文件，或重新导入 PDF。','warning',8000);
     }
     persist();$('connection-dot').classList.add('connected');setStatus('已连接本地服务 · 就绪');refresh();
   } catch(error){toast(`连接失败：${error.message}。请确认 Python 服务正在运行。`,'error',12000);setStatus('未连接，请检查服务并刷新网页');}
 }
+initFeatureEvents();
 void init();

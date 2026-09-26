@@ -14,11 +14,15 @@
 - Keep the original PDF immutable. Validate a proposed page operation before committing it to browser history. Preview and export must replay the same operations.
 - Image replacements must target only the selected occurrence, including images within shared Form XObjects. Preserve surrounding transforms, clipping and paint order.
 - History retains up to 40 transitions, permits jumping to a saved state and preserves undo/redo across a refresh while the server session remains alive. Editing after rollback replaces the later branch.
+- Portable `.pdfstudio` files include every source/image required by the current state and retained history, including undone steps. Reopen them in a fresh server session; validate the complete archive before replacing the current document. Never include session tokens or private local paths.
+- Search uses current page recipes and literal horizontal text; validate all affected pages before committing a batch. Newly added highlights/notes remain native annotations in standard PDF exports; raster exports retain only their visible marks.
 - Run meaningful regression checks for the changed behavior. Standard commands (use `.venv/Scripts/python.exe` on Windows):
   - `python -m pytest -q`
   - `node --check app/static/app.js`
+  - `node --check app/static/features.js`
   - `python tests/browser_smoke.py --url http://127.0.0.1:8000`
   - `python tests/browser_text_regressions.py --url http://127.0.0.1:8000`
   - `python tests/browser_draft_regressions.py --url http://127.0.0.1:8000`
   - `python tests/browser_history_images.py --url http://127.0.0.1:8000`
+  - `python tests/browser_search_annotations_projects.py --url http://127.0.0.1:8000`
 - Do not commit `.venv`, `work`, test artifacts, private PDFs, credentials, local font files or runtime binaries. Keep verification evidence and known limitations accurate in `docs/TEST_REPORT.md`.

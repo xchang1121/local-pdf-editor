@@ -76,7 +76,7 @@ def setup_offline(page, url, storage=None):
 
 def load_offline(page, storage):
     html=(ROOT/'app/static/index.html').read_text(encoding='utf-8')
-    html=html.replace('<link rel="stylesheet" href="/static/styles.css">','').replace('<script src="/static/app.js" defer></script>','')
+    html=html.replace('<link rel="stylesheet" href="/static/styles.css">','').replace('<script src="/static/app.js" defer></script>','').replace('<script src="/static/features.js" defer></script>','')
     page.set_content(html)
     page.add_style_tag(content=(ROOT/'app/static/styles.css').read_text(encoding='utf-8'))
     page.evaluate("""(stored)=>{
@@ -104,6 +104,7 @@ def load_offline(page, storage):
         if(blob)blob.arrayBuffer().then(buf=>window.__downloads.push({name,data:toBase64(new Uint8Array(buf))}));
       };
     }""",storage)
+    page.add_script_tag(content=(ROOT/'app/static/features.js').read_text(encoding='utf-8'))
     page.add_script_tag(content=(ROOT/'app/static/app.js').read_text(encoding='utf-8'))
 
 

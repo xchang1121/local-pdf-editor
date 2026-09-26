@@ -65,7 +65,46 @@ class ImageReplaceOp(StrictModel):
     fit: Literal["contain", "cover", "stretch"] = "contain"
 
 
-Operation = Annotated[TextOp | RectOp | RotateOp | ImageReplaceOp, Field(discriminator="kind")]
+AnnotationId = Annotated[str, Field(min_length=1, max_length=100, pattern=r'^[A-Za-z0-9_-]+$')]
+
+
+class AnnotationStyle(StrictModel):
+    comment: str = Field(default='', max_length=4000)
+    color: HexColor = '#ffd34e'
+    opacity: float = Field(default=.45, ge=.1, le=1, allow_inf_nan=False)
+
+
+class AnnotationOp(AnnotationStyle):
+    kind: Literal['annotation']
+    id: AnnotationId
+    type: Literal['highlight', 'note']
+    rect: Box
+    snap: bool = True
+
+
+class AnnotationUpdateOp(AnnotationStyle):
+    kind: Literal['annotation_update']
+    id: AnnotationId
+
+
+class AnnotationDeleteOp(StrictModel):
+    kind: Literal['annotation_delete']
+    id: AnnotationId
+
+
+class BatchReplaceOp(StrictModel):
+    kind: Literal['replace_batch']
+    replacements: list[TextOp] = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode='after')
+    def replacements_only(self):
+        if any(op.kind != 'replace' for op in self.replacements):
+            raise ValueError('批量替换只能包含文字替换。')
+        return self
+
+
+Operation = Annotated[TextOp | RectOp | RotateOp | ImageReplaceOp | BatchReplaceOp |
+                      AnnotationOp | AnnotationUpdateOp | AnnotationDeleteOp, Field(discriminator="kind")]
 
 
 class PageSpec(StrictModel):
@@ -89,3 +128,25 @@ class ExportRequest(StrictModel):
     mode: Literal["vector", "raster"] = "vector"
     dpi: int = Field(default=180, ge=72, le=300)
     filename: str = Field(default="edited.pdf", max_length=150)
+
+
+class SearchRequest(StrictModel):
+    pages: list[PageSpec] = Field(min_length=1, max_length=300)
+    query: str = Field(min_length=1, max_length=200)
+    case_sensitive: bool = False
+    page_ids: list[str] | None = Field(default=None, max_length=300)
+
+    @model_validator(mode='after')
+    def validate_query(self):
+        if not self.query.strip() or '\n' in self.query or '\r' in self.query:
+            raise ValueError('请输入非空的单行查找词。')
+        ids = [page.id for page in self.pages]
+        if len(set(ids)) != len(ids) or (self.page_ids is not None and not set(self.page_ids) <= set(ids)):
+            raise ValueError('查找页码范围无效。')
+        return self
+
+
+class SearchReplaceRequest(SearchRequest):
+    replacement: str = Field(max_length=1000)
+    ids: list[str] | None = Field(default=None, max_length=2000)
+    fit: bool = True

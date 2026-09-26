@@ -20,6 +20,7 @@ import pymupdf as fitz
 from .schemas import PageSpec
 from .errors import EditError
 from . import images as image_tools
+from . import annotations as annotation_tools
 
 MAX_PAGES = 300
 MAX_SIDE = 14400
@@ -179,7 +180,7 @@ def _text_font(page, op, warnings):
             css = ("@font-face {font-family:pdf-original;src:url(original-font.ttf);"
                    f"font-weight:{weight};font-style:{slant};}}")
             return "pdf-original", css, archive
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError, fitz.mupdf.FzErrorBase):
             warnings.append("此原字体无法复用，已使用替代字体；请检查字形和排版。")
             break
     else:
@@ -301,7 +302,13 @@ def build_page(spec_data: dict, source_data: bytes | None, images: dict[str, byt
         page = doc[0]
         normalize_rotation(page)
         for op in spec.ops:
-            if op.kind == "image_replace":
+            if op.kind.startswith('annotation'):
+                annotation_tools.apply(page, op)
+            elif op.kind == 'replace_batch':
+                for replacement in op.replacements:
+                    _insert_text(page, replacement, warnings)
+                    page = doc.reload_page(page)
+            elif op.kind == "image_replace":
                 raw = (images or {}).get(op.asset)
                 if raw is None:
                     raise EditError("替换图片不存在或会话已过期，请重新上传图片。")
@@ -426,6 +433,7 @@ def preview_page(spec_data: dict, source_data: bytes | None, scale: float, inclu
         if include_text:
             result.update(text_regions(page))
             result['images'] = image_tools.regions(page)
+            result['annotations'] = annotation_tools.regions(page)
         return result
     finally:
         doc.close()
@@ -454,7 +462,9 @@ def export_pdf(page_specs: list[dict], sources: dict[str, bytes], mode: str, dpi
                         # hidden CropBox content, metadata, attachments or text layer.
                         target.insert_image(target.rect, stream=pix.tobytes("png"))
                     else:
-                        out.insert_pdf(one, links=False, annots=False, widgets=False)
+                        # Imported annotations were baked at import; only review
+                        # items added by this editor remain interactive here.
+                        out.insert_pdf(one, links=False, annots=True, widgets=False)
                 finally:
                     one.close()
             except EditError as exc:

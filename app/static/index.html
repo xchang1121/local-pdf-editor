@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fa">
+  <title>页间 · PDF Studio</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="页间 PDF Studio 首页"><span class="brand-mark">页</span><span>页间 <small>PDF STUDIO</small></span></a>
+    <div class="header-divider"></div>
+    <div class="document-heading"><span id="document-title">未打开文档</span><small id="document-subtitle">让文档修改，更直接一点。</small></div>
+    <div class="header-actions">
+      <span class="local-badge"><span></span>本地服务处理</span>
+      <button id="btn-help" class="icon-button" title="使用说明" aria-label="使用说明">?</button>
+      <div class="history-buttons"><button id="undo" class="icon-button" title="撤销 Ctrl / ⌘ Z" aria-label="撤销" disabled data-icon="undo"></button><button id="redo" class="icon-button" title="重做 Ctrl / ⌘ Shift Z" aria-label="重做" disabled data-icon="redo"></button></div>
+      <button id="btn-history" class="button secondary" title="查看编辑历史"><span data-icon="history"></span><span>历史记录</span></button>
+      <button id="btn-open" class="button secondary"><span data-icon="folder"></span><span>打开 PDF</span></button>
+      <button id="btn-export" class="button primary" disabled><span data-icon="download"></span><span>导出 PDF</span></button>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside class="page-sidebar">
+      <div class="sidebar-tabs" role="tablist" aria-label="文档导航"><button id="tab-pages" role="tab" aria-selected="true" aria-controls="pages-panel">页面</button><button id="tab-history" role="tab" aria-selected="false" aria-controls="history-panel">历史 <span id="history-count">0</span></button></div>
+      <section id="pages-panel" class="navigation-panel" role="tabpanel" aria-labelledby="tab-pages">
+      <div class="sidebar-heading"><div><h2>页面</h2><span id="page-count" class="count-pill">0</span></div><button id="btn-blank" class="icon-button" title="插入空白页" aria-label="插入空白页" data-icon="plus"></button></div>
+      <div class="sidebar-actions"><button id="btn-append" class="button subtle small"><span data-icon="append"></span>追加 PDF</button><button id="btn-reorder" class="button subtle small" disabled title="输入页码顺序"><span data-icon="sort"></span>重排</button></div>
+      <div id="page-list" class="page-list" aria-label="页面缩略图"><div class="sidebar-empty"><span data-icon="pages"></span><p>文档的每一页<br>都会出现在这里</p></div></div>
+      <div class="page-batch">
+        <div class="batch-label"><label><input id="select-all" type="checkbox" aria-label="全选页面"> 全选</label><span id="selected-count">未选择</span></div>
+        <div class="batch-buttons"><button id="page-up" class="icon-button" title="当前页前移" aria-label="当前页前移" data-icon="up" disabled></button><button id="page-down" class="icon-button" title="当前页后移" aria-label="当前页后移" data-icon="down" disabled></button><button id="page-duplicate" class="icon-button" title="复制当前页" aria-label="复制当前页" data-icon="copy" disabled></button><button id="page-delete" class="icon-button danger-text" title="删除勾选页（未勾选时删除当前页）" aria-label="删除页面" data-icon="trash" disabled></button></div>
+      </div>
+      </section>
+      <section id="history-panel" class="navigation-panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+        <div class="history-heading"><h2>编辑历史</h2><p>点击任一步，回到当时的文档。</p></div>
+        <ol id="history-list" class="history-list" aria-label="编辑历史步骤"></ol>
+        <div class="history-footer">保留最近 40 步，同标签页刷新可恢复。<br>回退后继续编辑，会替换后续记录。</div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <nav class="toolbar" aria-label="编辑工具">
+        <div class="tool-group">
+          <button data-tool="select" class="tool active" title="点击文字块进行修改"><span data-icon="cursor"></span>编辑文字</button>
+          <button data-tool="text" class="tool" title="拖出新文本框"><span data-icon="text"></span>添加文字</button>
+          <button data-tool="image" class="tool" title="选中页面图片并替换"><span data-icon="image"></span>替换图片</button>
+          <span class="tool-divider"></span>
+          <button data-tool="crop" class="tool" title="拖出需要保留的区域"><span data-icon="crop"></span>裁剪</button>
+          <button data-tool="cover" class="tool" title="仅视觉遮盖，不删除底层内容"><span data-icon="square"></span>遮盖</button>
+          <button data-tool="redact" class="tool" title="删除选区内的底层内容"><span data-icon="shield"></span>真正删除</button>
+        </div>
+        <div class="view-controls"><button id="rotate" class="icon-button" title="顺时针旋转 90°" aria-label="旋转页面" data-icon="rotate" disabled></button><select id="zoom" aria-label="缩放比例"><option value="fit">适合宽度</option><option value="0.6">60%</option><option value="0.8">80%</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option></select></div>
+      </nav>
+      <div class="context-bar"><span id="tool-hint">打开一个 PDF，或从空白页开始。</span><span id="page-size"></span></div>
+      <div id="canvas-scroll" class="canvas-scroll">
+        <section id="empty-state" class="empty-state">
+          <div class="hero-eyebrow">YOUR DOCUMENT. YOUR WAY.</div>
+          <h1>改文字，调页面。<br><span>在这里，一起完成。</span></h1>
+          <p class="hero-description">不用在多个工具之间切换。<br>从一个 PDF 开始，整理成你需要的样子。</p>
+          <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入 PDF">
+            <div class="upload-symbol" data-icon="upload"></div>
+            <strong>拖入 PDF，或点击选择文件</strong>
+            <span>每个文件最多 50 MB · 可同时追加多个文件</span>
+          </div>
+          <div class="empty-links"><button id="btn-demo">试用示例文档 <span>↗</span></button><span>或者</span><button id="btn-start-blank">新建空白页</button></div>
+          <div class="feature-row"><div><span>01</span><strong>文字与排版</strong><p>选中文本块，直接修改。</p></div><div><span>02</span><strong>页面管理</strong><p>拖动排序，自由删减。</p></div><div><span>03</span><strong>区域裁剪</strong><p>框出你想保留的部分。</p></div></div>
+        </section>
+        <div id="page-container" class="page-container" hidden>
+          <div class="page-top-label"><span id="current-page-label">PAGE 01</span><span id="page-source-label"></span></div>
+          <div id="page-stage" class="page-stage"><img id="page-image" alt="PDF 当前页面预览" draggable="false"><div id="overlay" class="overlay"><div id="text-hits"></div><div id="image-hits"></div><div id="selection-box" class="selection-box" hidden><span class="selection-caption" id="selection-caption"></span><span class="resize-handle" data-resize="se"></span></div></div></div>
+          <div class="page-bottom-label">拖动左侧缩略图调整页序 · 页面坐标以 pt 为单位</div>
+        </div>
+      </div>
+      <div id="busy-indicator" class="busy-indicator" hidden><span class="spinner"></span><span id="busy-message">正在处理 PDF…</span></div>
+    </main>
+
+    <aside class="properties-sidebar">
+      <div class="properties-heading"><h2 id="properties-title">编辑面板</h2><span id="draft-badge" class="draft-badge" hidden>尚未应用</span></div>
+      <div class="properties-scroll">
+        <section id="guide-panel">
+          <div class="guide-card"><div class="guide-icon" data-icon="cursor"></div><h3>选中，然后修改。</h3><p>打开文档后，点击页面中的文字块。也可以选择上方工具，在页面上拖出一个区域。</p></div>
+          <div class="field"><label for="text-granularity">文字选择方式</label><select id="text-granularity"><option value="blocks">文本块 / 段落</option><option value="lines">单行文字</option></select></div>
+          <div id="text-status" class="note muted">扫描件没有可直接编辑的文字层。本版不包含 OCR。</div>
+          <div id="image-guide" class="image-guide" hidden><div class="section-label">本页图片 <span id="image-count">0</span></div><div id="image-list" class="image-list"></div><p class="note muted">可点击页面上的图片框，或从这里选择。图片内的文字会随整张图片一起替换。</p></div>
+          <div class="section-divider"></div>
+          <div class="section-label">当前页面</div>
+          <dl class="page-details"><div><dt>尺寸</dt><dd id="detail-size">—</dd></div><div><dt>已应用操作</dt><dd id="detail-ops">—</dd></div><div><dt>编辑方式</dt><dd>保留源文件</dd></div></dl>
+          <button id="reset-page" class="button secondary full" disabled><span data-icon="reset"></span>重置当前页编辑</button>
+          <div class="note muted small-note">重置不改变页序，也不会修改原始文件。</div>
+          <div class="section-divider"></div>
+          <div class="section-label">导出之前，了解这两点</div>
+          <div class="mini-note"><span data-icon="square"></span><p><strong>遮盖不是删除</strong>遮盖层下面的文字仍可能被复制。</p></div>
+          <div class="mini-note"><span data-icon="crop"></span><p><strong>普通裁剪只改变可见范围</strong>要丢弃隐藏内容，导出时选择图像化 PDF。</p></div>
+        </section>
+
+        <section id="draft-panel" hidden>
+          <div id="edit-note" class="note"></div>
+          <div id="image-fields" hidden>
+            <div class="image-upload-preview"><img id="replacement-preview" alt="待替换的新图片" hidden><span id="replacement-placeholder" data-icon="image"></span></div>
+            <button id="choose-image-file" class="button primary full"><span data-icon="upload"></span>选择替换图片</button>
+            <p id="replacement-file-label" class="field-help">PNG、JPEG、WebP · 最大 20 MB</p>
+            <div class="field"><label for="image-fit">图片适配</label><select id="image-fit"><option value="contain">完整显示 · 保持比例</option><option value="cover">填满原区域 · 居中裁切</option><option value="stretch">拉伸至原区域</option></select></div>
+            <p class="note muted">保留原图位置、旋转、裁剪和图层顺序。仅替换当前选中的这一处图片。</p>
+          </div>
+          <div id="text-fields">
+            <div class="field"><label for="text-content">文字内容</label><textarea id="text-content" rows="6" placeholder="输入要放在页面上的文字…"></textarea></div>
+              <div class="field"><label for="font-family">字体类型 <span class="label-note">原字体不可用时会提示</span></label><select id="font-family"><option value="original">原字体 · 尽可能保留</option><option value="sans-serif">无衬线 · Sans Serif</option><option value="serif">衬线 · Serif</option><option value="monospace">等宽 · Monospace</option></select></div>
+            <div class="field-row"><div class="field"><label for="font-size">字号 · pt</label><input id="font-size" type="number" min="4" max="200" step="0.5" value="14"></div><div class="field"><label for="line-height">行距倍数</label><input id="line-height" type="number" min="0.85" max="3" step="0.05" value="1.25"></div></div>
+            <div class="format-row"><label class="format-toggle"><input id="font-bold" type="checkbox"><span><b>B</b></span></label><label class="format-toggle"><input id="font-italic" type="checkbox"><span><i>I</i></span></label><select id="text-align" aria-label="对齐方式"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option><option value="justify">两端对齐</option></select><input id="text-color" type="color" value="#172033" title="文字颜色" aria-label="文字颜色"></div>
+            <label class="checkbox-row"><input id="text-fit" type="checkbox" checked> 放不下时自动缩小 <span class="label-note">最多 35%</span></label>
+            <div class="background-row"><label class="checkbox-row"><input id="text-background" type="checkbox"> 文本框背景色</label><input id="background-color" type="color" value="#ffffff" aria-label="文本框背景颜色"></div>
+          </div>
+          <div id="area-color-field" class="field" hidden><label for="area-color">填充颜色</label><input id="area-color" type="color" value="#ffffff"></div>
+          <div id="geometry-fields"><div class="section-divider"></div><div class="section-label">位置与尺寸 <span class="label-note">pt · 1/72 英寸</span></div>
+          <div class="field-row"><div class="field"><label for="rect-x">X</label><input id="rect-x" type="number" min="0" step="0.5"></div><div class="field"><label for="rect-y">Y</label><input id="rect-y" type="number" min="0" step="0.5"></div></div>
+          <div class="field-row"><div class="field"><label for="rect-w">宽度</label><input id="rect-w" type="number" min="1" step="0.5"></div><div class="field"><label for="rect-h">高度</label><input id="rect-h" type="number" min="1" step="0.5"></div></div>
+          <div class="note muted small-note">拖动选框可移动；拖动右下角可缩放。应用后显示实际 PDF 渲染结果。</div>
+          </div>
+          <div id="crop-options" hidden><label class="checkbox-row"><input id="crop-all" type="checkbox"> 按相同比例裁剪所有页面</label><p class="note warning">普通裁剪不会彻底删除框外内容。涉及隐私时，应使用图像化导出。</p></div>
+
+        </section>
+      </div>
+      <div id="draft-actions" class="draft-actions" hidden><button id="apply-edit" class="button primary full">应用修改</button><button id="cancel-edit" class="button secondary full">取消</button><button id="remove-text" class="button text-danger full" hidden>删除这段原文字</button></div>
+      <div class="session-footer"><span data-icon="lock"></span><span>文件发送至你运行的服务<br>默认仅本机可访问</span><button id="btn-clear" title="清空会话" aria-label="清空会话" data-icon="close"></button></div>
+    </aside>
+  </div>
+  <footer class="statusbar"><span><i id="connection-dot"></i><span id="status-message">连接本地编辑服务…</span></span><span id="status-pages">源文件不会被覆盖</span><span>PDF STUDIO <b>v1.1</b></span></footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <input id="file-input" type="file" accept=".pdf,application/pdf" multiple hidden>
+  <input id="image-file-input" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden>
+
+  <dialog id="export-dialog">
+    <div class="dialog-header"><div><span class="eyebrow">READY TO GO</span><h2>导出你的文档</h2></div><button class="icon-button" data-close-dialog="export-dialog" aria-label="关闭导出窗口" data-icon="close"></button></div>
+    <div class="field"><label for="export-name">文件名</label><input id="export-name" value="edited.pdf" maxlength="150"></div>
+    <div class="field"><label for="export-range">导出页码 <span class="label-note">按左侧当前页序</span></label><input id="export-range" placeholder="留空导出全部；例如 1-3,5"><span class="field-help">支持范围和指定顺序，例如 3,1-2。导出部分页面即可提取 / 拆分文档。</span></div>
+    <label class="export-option"><input type="radio" name="export-mode" value="vector" checked><span><strong>标准 PDF <small>保留文字与矢量内容</small></strong><p>文字仍可选取。普通遮盖下和裁剪框外的内容可能仍存在，不应视作隐私删除。</p></span></label>
+    <label class="export-option"><input type="radio" name="export-mode" value="raster"><span><strong>图像化 PDF <small>仅保留可见像素</small></strong><p>重新生成每一页，不携带原文字层或框外对象。文字不可选取，文件可能更大。</p></span></label>
+    <div id="dpi-field" class="field" hidden><label for="export-dpi">图像化分辨率</label><select id="export-dpi"><option value="120">120 DPI · 较小文件</option><option value="180" selected>180 DPI · 平衡</option><option value="240">240 DPI · 较清晰</option><option value="300">300 DPI · 高清</option></select></div>
+    <p class="note muted">本版导出静态页面，不保留书签、可点击链接、可交互表单、附件或有效数字签名。编辑会话仍保存源文件和撤销记录；导出不等于清空会话。</p>
+    <div class="dialog-actions"><button class="button secondary" data-close-dialog="export-dialog">取消</button><button id="confirm-export" class="button primary"><span data-icon="download"></span>生成并下载</button></div>
+  </dialog>
+
+  <dialog id="help-dialog">
+    <div class="dialog-header"><div><span class="eyebrow">A LITTLE GUIDANCE</span><h2>从这里开始</h2></div><button class="icon-button" data-close-dialog="help-dialog" aria-label="关闭说明" data-icon="close"></button></div>
+    <div class="help-content">
+      <h3>文字修改</h3><p>选择“编辑文字”，点击文本块，在右侧修改文字、字号、颜色、行距、对齐及位置，点击“应用修改”。单行选择适合只改一句或一个数字。替换会移除所选原文字并重新排版；混合字体会统一成所选样式，特殊字体不保证原样。</p>
+      <h3>图片替换</h3><p>选择“替换图片”，点击页面图片或右侧列表，上传 PNG、JPEG 或静态 WebP（最大 20 MB、2400 万像素）。可保持比例完整显示、裁切填满或拉伸。点击“应用修改”后生效；仅替换选中位置，保留原有旋转、外部裁剪和图层顺序。整页扫描图也可替换，图片里的文字会一起改变。矢量图形不属于图片对象。</p>
+      <h3>编辑历史</h3><p>点击顶部“历史记录”或左侧“历史”，查看操作并点击任一步回退。后续记录仍可重做，回退后继续编辑会替换后续分支。保留最近 40 步，同标签页刷新可以恢复文档、当前步骤及前后历史；服务重启、会话过期后无法恢复，请及时导出。</p>
+      <h3>页面管理</h3><p>拖动左侧缩略图排序，也可点“重排”输入精确页序。勾选后批量删除；下方箭头移动当前页。追加 PDF 可合并文件，导出时填写页码可提取页面。所有页码均为当前列表的实际顺序。</p>
+      <h3>裁剪与内容移除</h3><p>选择“裁剪”，拖出要保留的区域。普通裁剪不删除底层内容；“遮盖”同样只改变外观。“真正删除”会移除选区内文字、重叠图像像素及接触选区的矢量路径，可能连带影响跨越选区的大图形。隐私文档可用“图像化 PDF”导出，并逐页检查。</p>
+      <h3>支持边界</h3><p>本版不含 OCR、图片对象自由拖动、跨页段落自动重排、竖排文字编辑、原字体精确还原或数字签名维护。扫描件可裁剪、遮盖、真正删除和加字；不能像普通文字一样点选原内容。即使扫描件带有 OCR 文字层，替换该层也不会自动清除扫描图像中的原字，应先真正删除区域再加字。</p>
+      <h3>保存与隐私</h3><p>文件发到本地服务，不依赖云端或 CDN。当前页面与历史记录暂存于此标签页；原 PDF 和替换图片存于服务内存，上传解析可能短暂使用系统临时文件，读取后关闭删除。服务重启或会话闲置超过四小时后清理文件（定期清理最多延迟一分钟）。关闭标签页不会立即清除服务内存，使用“清空会话”主动结束。本版用于个人本地处理。</p>
+      <p class="shortcut-note">Ctrl / ⌘ Z 撤销　·　Ctrl / ⌘ Shift Z 重做　·　Esc 取消选区</p>
+    </div>
+    <div class="dialog-actions"><button class="button primary" data-close-dialog="help-dialog">开始编辑</button></div>
+  </dialog>
+</body>
+</html>

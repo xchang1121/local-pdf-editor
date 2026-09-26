@@ -1,0 +1,18 @@
+services:
+  pdf-studio:
+    build: .
+    # Container listens internally on all interfaces; published port is local only.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PDF_STUDIO_HOSTS: "127.0.0.1,localhost"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 128

@@ -1,0 +1,7 @@
+# Tested versions, not a claim that these are the latest releases.
+fastapi==0.128.2
+uvicorn==0.48.0
+python-multipart==0.0.29
+PyMuPDF==1.26.7
+pypdf==6.10.0
+Pillow==12.1.1
